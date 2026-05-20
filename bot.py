@@ -1,151 +1,185 @@
 import os
 import random
 import time
-import threading
 from datetime import datetime, timedelta, timezone
 
 import telebot
 from telebot import types
 
+# =========================
+# BASIC SETTINGS
+# =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable is missing.")
+
 bot = telebot.TeleBot(BOT_TOKEN)
 
 BOT_NAME = "S_R X VENOM_AI"
-ADMIN_USERNAME = "srtraderowner_098"
-
+ADMIN_USERNAME = "srtraderowner_098"  # @ ছাড়া username
 CHANNEL_ID = -1002734046747
 CHANNEL_LINK = "https://t.me/+jlIIxaT6OB0wNDk1"
 
 BD_TZ = timezone(timedelta(hours=6))
-MAX_SIGNAL = 5
-
-users = {}
-last_signal = {}
 
 PAIRS = [
-    "USD/BDT (OTC)",
-    "USD/INR (OTC)",
-    "USD/IDR (OTC)",
-    "USD/BRL (OTC)",
-    "EUR/USD (OTC)",
-    "GBP/USD (OTC)",
-    "USD/DZD (OTC)",
-]  "USD/MXN (OTC)",
+    "USDMXN-OTC",
+    "USDIDR-OTC",
+    "USDBDT-OTC",
+    "USDINR-OTC",
+    "EURUSD-OTC",
+    "GBPUSD-OTC",
+]
 
+pending_signals = {}
+
+
+# =========================
+# HELPERS
+# =========================
 def now_bd():
     return datetime.now(BD_TZ)
 
-def user_data(uid):
-    today = now_bd().strftime("%Y-%m-%d")
-    if uid not in users or users[uid]["date"] != today:
-        users[uid] = {"date": today, "left": MAX_SIGNAL}
-    return users[uid]
 
-def is_joined(uid):
+def clean_username(username):
+    return (username or "").replace("@", "").lower()
+
+
+def is_admin(user):
+    return clean_username(user.username) == clean_username(ADMIN_USERNAME)
+
+
+def is_joined(user_id):
     try:
-        m = bot.get_chat_member(CHANNEL_ID, uid)
-        return m.status not in ["left", "kicked"]
-    except:
+        member = bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status not in ["left", "kicked"]
+    except Exception:
+        # Bot channel admin না হলে এখানে fail করতে পারে
         return False
 
-def join_keyboard():
+
+# =========================
+# BUTTONS
+# =========================
+def join_markup():
     kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("📢 JOIN CHANNEL", url=CHANNEL_LINK),
-        types.InlineKeyboardButton("✅ I HAVE JOINED", callback_data="check_join"),
-    )
+    kb.add(types.InlineKeyboardButton("📢 JOIN CHANNEL", url=CHANNEL_LINK))
+    kb.add(types.InlineKeyboardButton("✅ I JOINED", callback_data="check_join"))
     return kb
 
-def menu():
+
+def main_menu():
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
-        types.InlineKeyboardButton("📊 LIVE SIGNAL", callback_data="live"),
-        types.InlineKeyboardButton("🌈 RESULT CHECKER", callback_data="result"),
-        types.InlineKeyboardButton("👨‍💻 CONTACT ADMIN", url=f"https://t.me/{ADMIN_USERNAME}")
+        types.InlineKeyboardButton("📊 LIVE SIGNAL", callback_data="live_signal"),
+        types.InlineKeyboardButton("🌈 RESULT CHECKER", callback_data="result_checker"),
+    )
+    kb.add(types.InlineKeyboardButton("👨‍💻 CONTACT ADMIN", url=f"https://t.me/{ADMIN_USERNAME}"))
+    return kb
+
+
+def admin_result_markup(signal_id):
+    kb = types.InlineKeyboardMarkup(row_width=3)
+    kb.add(
+        types.InlineKeyboardButton("✅ WIN", callback_data=f"result:win:{signal_id}"),
+        types.InlineKeyboardButton("🟨 MTG", callback_data=f"result:mtg:{signal_id}"),
+        types.InlineKeyboardButton("❌ LOSS", callback_data=f"result:loss:{signal_id}"),
     )
     return kb
 
-def send_home(chat_id, uid, name="Trader"):
-    data = user_data(uid)
-    bot.send_message(chat_id, f"""
+
+# =========================
+# TEXT UI
+# =========================
+def start_text(message):
+    name = message.from_user.first_name or "MD"
+    return f"""
 ━━━━━━━━━━━━━━━━━━━━
-🔥 {BOT_NAME}
+| 🌪 {BOT_NAME} |
 ━━━━━━━━━━━━━━━━━━━━
 
-✨ Welcome, {name}
+✨ Welcome, {name}!
 
-📊 Market: OTC
+📊 OTC + REAL Market
 🕐 Timezone: UTC+6 Bangladesh
-⌛ Expiry: M1
-🔁 MTG: 1 Step
+⌛ Signal Type: M1
+🛡 MTG: 1 Step
 
-📌 Signals left today: {data["left"]}
+⬇️ Select option below:
+"""
 
-Choose option below 👇
-""", reply_markup=menu())
 
-def create_signal():
-    now = now_bd()
-    entry = now + timedelta(minutes=random.choice([2, 3]))
-    result_time = entry + timedelta(seconds=75)
+def make_signal():
+    entry = now_bd() + timedelta(minutes=2)
+    signal_id = str(int(time.time()))
 
     return {
+        "id": signal_id,
         "pair": random.choice(PAIRS),
-        "direction": random.choice(["CALL 🟢", "PUT 🔴"]),
-        "signal_time": now.strftime("%H:%M:%S"),
-        "entry_time": entry.strftime("%H:%M"),
-        "result_time": result_time,
-        "result": random.choice(["WIN", "WIN", "WIN", "MTG WIN", "LOSS"])
+        "direction": random.choice(["CALL", "PUT"]),
+        "entry_time": entry,
+        "entry_text": entry.strftime("%H:%M"),
+        "confidence": random.randint(92, 98),
     }
 
+
 def signal_text(sig):
-    direction = sig["direction"].replace(" 🟢", "").replace(" 🔴", "")
-
+    direction_emoji = "🟢" if sig["direction"] == "CALL" else "🔴"
     return f"""
-☲☲☲☲ 【𝚂_𝚁 𝚇 𝚅𝙴𝙽𝙾𝙼_𝙰𝙸】☲☲☲☲
+══════ 【{BOT_NAME}】 ══════
+
 ╭━━━━━━【⛨】━━━━━━╮
-💎 𝙰𝙲𝚃𝙸𝚅𝙴 𝙿𝙰𝙸𝚁 »» {sig["pair"]}
-⏰ 𝚃𝙸𝙼𝙴𝚃𝙰𝙱𝙻𝙴 »» {sig["entry_time"]}
-⏳ 𝙴𝚇𝙿𝙸𝚁𝙰𝚃𝙸𝙾𝙽 »» M1
-🟢 𝙳𝙸𝚁𝙴𝙲𝚃𝙸𝙾𝙽 »» {direction}
-✨ 𝙲𝙾𝙽𝙵𝙸𝙳𝙴𝙽𝙲𝙴 »» {random.randint(92, 97)}%
+💎 ACTIVE PAIR »» {sig['pair']}
+⏰ TIMETABLE »» {sig['entry_text']}
+⏳ EXPIRATION »» M1
+{direction_emoji} DIRECTION »» {sig['direction']}
+✨ CONFIDENCE »» {sig['confidence']}%
 ╰━━━━━━【⛨】━━━━━━╯
-‼️ 𝙼𝚃𝙶 1 𝚂𝚃𝙴𝙿 𝙸𝙵 𝙻𝙾𝚂𝚂 ‼️
-💬𝙲𝚘𝚗𝚝𝚊𝚌𝚝: @{ADMIN_USERNAME}
+
+‼️ MTG 1 STEP IF LOSS ‼️
+
+💬 Contact: @{ADMIN_USERNAME}
 """
 
-def result_text(sig):
-    if sig["result"] == "WIN":
-        r = "🟩🟩 SURESHOT WIN ✅ 🟩🟩"
-    elif sig["result"] == "MTG WIN":
-        r = "🟨🟨 MTG 1 STEP WIN ✅ 🟨🟨"
+
+def result_text(sig, result):
+    if result == "win":
+        status = "🟩🟩🟩 SURESHOT WIN 🟩🟩🟩"
+    elif result == "mtg":
+        status = "🟨🟨🟨 SURESHOT MTG 🟨🟨🟨"
     else:
-        r = "🟥🟥 LOSS ❌ 🟥🟥"
+        status = "🟥🟥🟥 SIGNAL LOSS 🟥🟥🟥"
 
     return f"""
-========== RESULT ==========
+══════════ RESULT ══════════
 
-📊 {sig["pair"]}
-🕯 Entry: {sig["entry_time"]} CANDLE
+╭━━━━━━【⛨】━━━━━━╮
+📊 {sig['pair']} | 🕘 {sig['entry_text']}
 
-{r}
+{status}
 
-👨‍💻 Contact: @{ADMIN_USERNAME}
+╰━━━━━━【⛨】━━━━━━╯
+
+📳 Result Sent Successfully
+💬 Contact: @{ADMIN_USERNAME}
 """
 
-@bot.message_handler(commands=["start"])
-def start(msg):
-    uid = msg.from_user.id
 
-    if not is_joined(uid):
+# =========================
+# HANDLERS
+# =========================
+@bot.message_handler(commands=["start"])
+def start(message):
+    if not is_joined(message.from_user.id):
         bot.send_message(
-            msg.chat.id,
-            "🔐 Access Locked\n\nআগে private channel এ join করো। তারপর ✅ I HAVE JOINED চাপো।",
-            reply_markup=join_keyboard()
+            message.chat.id,
+            "🔐 First join our channel, then tap ✅ I JOINED.",
+            reply_markup=join_markup(),
         )
         return
 
-    send_home(msg.chat.id, uid, msg.from_user.first_name or "Trader")
+    bot.send_message(message.chat.id, start_text(message), reply_markup=main_menu())
+
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
@@ -154,53 +188,70 @@ def callback(call):
 
     if call.data == "check_join":
         if is_joined(uid):
-            bot.send_message(call.message.chat.id, "✅ Access Approved!")
-            send_home(call.message.chat.id, uid, call.from_user.first_name or "Trader")
+            bot.send_message(call.message.chat.id, "✅ Access Approved!", reply_markup=main_menu())
         else:
             bot.send_message(
                 call.message.chat.id,
-                "❌ Join detect হয়নি। Bot কে channel admin করা আছে কিনা check করো।",
-                reply_markup=join_keyboard()
+                "❌ Join not detected.\n\nBot কে private channel এর admin করে দাও, তারপর আবার try করো।",
+                reply_markup=join_markup(),
             )
         return
 
     if not is_joined(uid):
-        bot.send_message(
-            call.message.chat.id,
-            "🔐 আগে channel join করো।",
-            reply_markup=join_keyboard()
-        )
+        bot.send_message(call.message.chat.id, "🔐 First join channel.", reply_markup=join_markup())
         return
 
-    data = user_data(uid)
-
-    if call.data == "live":
-        if data["left"] <= 0:
-            bot.send_message(call.message.chat.id, "❌ Daily signal limit finished.")
-            return
-
-        data["left"] -= 1
-        sig = create_signal()
-        last_signal[uid] = sig
+    if call.data == "live_signal":
+        sig = make_signal()
+        pending_signals[sig["id"]] = {
+            "signal": sig,
+            "chat_id": call.message.chat.id,
+        }
 
         bot.send_message(call.message.chat.id, signal_text(sig))
-        bot.send_message(call.message.chat.id, f"📌 Remaining Signals: {data['left']}")
 
-        def wait_and_result():
-            wait = int((sig["result_time"] - now_bd()).total_seconds())
-            if wait < 5:
-                wait = 5
-            time.sleep(wait)
-            bot.send_message(call.message.chat.id, result_text(sig), reply_markup=menu())
+        # Admin হলে result control button দেখাবে
+        if is_admin(call.from_user):
+            bot.send_message(
+                call.message.chat.id,
+                "🛡 Select Result After Candle Close:",
+                reply_markup=admin_result_markup(sig["id"]),
+            )
+        return
 
-        threading.Thread(target=wait_and_result, daemon=True).start()
-
-    elif call.data == "result":
-        sig = last_signal.get(uid)
-        if not sig:
-            bot.send_message(call.message.chat.id, "❌ আগে LIVE SIGNAL নাও।")
+    if call.data == "result_checker":
+        if not pending_signals:
+            bot.send_message(call.message.chat.id, "📊 No pending signal result right now.", reply_markup=main_menu())
         else:
-            bot.send_message(call.message.chat.id, result_text(sig), reply_markup=menu())
+            bot.send_message(call.message.chat.id, "📊 Pending signal result available. Admin will publish soon.")
+        return
 
-print("V1 stable bot running...")
-bot.infinity_polling(skip_pending=True)
+    if call.data.startswith("result:"):
+        if not is_admin(call.from_user):
+            bot.answer_callback_query(call.id, "Only admin can publish result.", show_alert=True)
+            return
+
+        _, result, signal_id = call.data.split(":")
+        item = pending_signals.get(signal_id)
+
+        if not item:
+            bot.send_message(call.message.chat.id, "❌ Signal expired/not found.")
+            return
+
+        sig = item["signal"]
+
+        # Entry candle শেষ হওয়ার আগে result publish করবে না
+        publish_time = sig["entry_time"] + timedelta(minutes=1, seconds=5)
+        wait = int((publish_time - now_bd()).total_seconds())
+
+        if wait > 0:
+            bot.send_message(call.message.chat.id, f"⏳ Result will publish after {wait} seconds...")
+            time.sleep(wait)
+
+        bot.send_message(item["chat_id"], result_text(sig, result), reply_markup=main_menu())
+        pending_signals.pop(signal_id, None)
+        return
+
+
+print("✅ S_R X VENOM_AI Bot Running...")
+bot.infinity_polling(skip_pending=True, timeout=60)
