@@ -29,7 +29,8 @@ PAIRS = [
     "USD/BRL (OTC)",
     "EUR/USD (OTC)",
     "GBP/USD (OTC)",
-]
+    "USD/DZD (OTC)",
+]  "USD/MXN (OTC)",
 
 def now_bd():
     return datetime.now(BD_TZ)
@@ -98,20 +99,19 @@ def create_signal():
     }
 
 def signal_text(sig):
+    direction = sig["direction"].replace(" 🟢", "").replace(" 🔴", "")
+
     return f"""
-==== {BOT_NAME} SIGNAL ====
-
-╭━━━━━━━・◆・━━━━━━━╮
-📊 PAIR        → {sig["pair"]}
-🕘 SIGNAL TIME → {sig["signal_time"]} UTC+6
-🕯 ENTRY TIME  → {sig["entry_time"]} CANDLE
-⌛ EXPIRY      → M1
-📈 DIRECTION   → {sig["direction"]}
-╰━━━━━━━・◆・━━━━━━━╯
-
-🔁 MTG 1 STEP IF LOSS
-
-👨‍💻 Contact: @{ADMIN_USERNAME}
+☲☲☲☲ 【𝚂_𝚁 𝚇 𝚅𝙴𝙽𝙾𝙼_𝙰𝙸】☲☲☲☲
+╭━━━━━━【⛨】━━━━━━╮
+💎 𝙰𝙲𝚃𝙸𝚅𝙴 𝙿𝙰𝙸𝚁 »» {sig["pair"]}
+⏰ 𝚃𝙸𝙼𝙴𝚃𝙰𝙱𝙻𝙴 »» {sig["entry_time"]}
+⏳ 𝙴𝚇𝙿𝙸𝚁𝙰𝚃𝙸𝙾𝙽 »» M1
+🟢 𝙳𝙸𝚁𝙴𝙲𝚃𝙸𝙾𝙽 »» {direction}
+✨ 𝙲𝙾𝙽𝙵𝙸𝙳𝙴𝙽𝙲𝙴 »» {random.randint(92, 97)}%
+╰━━━━━━【⛨】━━━━━━╯
+‼️ 𝙼𝚃𝙶 1 𝚂𝚃𝙴𝙿 𝙸𝙵 𝙻𝙾𝚂𝚂 ‼️
+💬𝙲𝚘𝚗𝚝𝚊𝚌𝚝: @{ADMIN_USERNAME}
 """
 
 def result_text(sig):
